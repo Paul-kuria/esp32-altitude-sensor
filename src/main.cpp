@@ -3,14 +3,26 @@
 #include "SPI.h"
 #include <Arduino.h>
 #include "driver/gpio.h"
+//TFlidar Libraries
+#include "SoftwareSerial.h"
+#include "TFMini.h"
 //MicroSD Libraries {File System}
 #include "FS.h" 
 #include "SD_MMC.h"
 
-/*-- INITIALIZE DS3231 RTC --*/
-RTC_DS3231 rtc;
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+/*-- INITIALIZE TF-MINI LIDAR --*/
+TFMini tfmini;
 
+#define RXD2 0
+#define TXD2 15
+int dist; /*----actual distance measurements of LiDAR---*/
+int strength; /*----signal strength of LiDAR----------------*/
+float temprature;
+unsigned char check;        /*----save check value------------------------*/
+int i;
+unsigned char uart[9];  /*----save data measured by LiDAR-------------*/
+const int HEADER=0x59; /*----frame header of data package------------*/
+int rec_debug_state = 0x01;//receive state for frame
 
 /*-- INITIALIZE DS3231 RTC --*/
 unsigned int fileCount = 0;
@@ -19,11 +31,10 @@ unsigned int fileCount = 0;
 void initMicroSD(){  
   //rtc_gpio_hold_en(GPIO_NUM_4);    //make sure flash is held LOW in sleep
   Serial.println("Mounting MicroSD card");
-
-  // if (!SD_MMC.begin()){
-  //   Serial.println("MicroSD card mount failed");
-  //   return;
-  // }
+  if (!SD_MMC.begin("/sdcard", true)){
+    Serial.println("MicroSD card mount failed");
+    return;
+  }
   uint8_t cardType = SD_MMC.cardType();
   if (cardType == CARD_NONE){
     Serial.println("No MicroSD card found");
@@ -124,29 +135,106 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
     }
 }
 
+/***----------------------------- LIDAR/RTC --------------------------***/
+void Get_Lidar_data(){
+  
+  if (Serial.available()) //check if serial port has data input
+      {
+      if(rec_debug_state == 0x01)
+          {  //the first byte
+            uart[0]=Serial.read();
+            if(uart[0] == 0x59)
+                {
+                  check = uart[0];
+                  rec_debug_state = 0x02;
+                }
+          }
+  else if(rec_debug_state == 0x02)
+      {//the second byte
+        uart[1]=Serial.read();
+        if(uart[1] == 0x59)
+            {
+              check += uart[1];
+              rec_debug_state = 0x03;
+            }
+        else{
+              rec_debug_state = 0x01;
+            }
+        }
+
+  else if(rec_debug_state == 0x03)
+          {
+            uart[2]=Serial.read();
+            check += uart[2];
+            rec_debug_state = 0x04;
+          }
+  else if(rec_debug_state == 0x04)
+          {
+            uart[3]=Serial.read();
+            check += uart[3];
+            rec_debug_state = 0x05;
+          }
+  else if(rec_debug_state == 0x05)
+          {
+            uart[4]=Serial.read();
+            check += uart[4];
+            rec_debug_state = 0x06;
+          }
+  else if(rec_debug_state == 0x06)
+          {
+            uart[5]=Serial.read();
+            check += uart[5];
+            rec_debug_state = 0x07;
+          }
+  else if(rec_debug_state == 0x07)
+          {
+            uart[6]=Serial.read();
+            check += uart[6];
+            rec_debug_state = 0x08;
+          }
+  else if(rec_debug_state == 0x08)
+          {
+            uart[7]=Serial.read();
+            check += uart[7];
+            rec_debug_state = 0x09;
+          }
+  else if(rec_debug_state == 0x09)
+          {
+            uart[8]=Serial.read();
+            if(uart[8] == check)
+              {
+                dist = uart[2] + uart[3]*256;//the distance
+                strength = uart[4] + uart[5]*256;//the strength
+                temprature = uart[6] + uart[7] *256;//calculate chip temprature
+                temprature = temprature/8 - 256;                              
+                //while(Serial2.available()){Serial2.read();} // This part is added becuase some previous packets are there in the buffer so to clear serial buffer and get fresh data.
+              
+                String tf = String(dist) + "," + String(strength) + "," + String(temprature);
+                String dataMessage = tf + "\r\n";
+
+                Serial.println("saving data: ");
+                Serial.println("----------------------------------------------");
+                Serial.println(dataMessage);
+
+                appendFile(SD_MMC, "/example2_data.txt", dataMessage.c_str());
+                delay(1000);
+              }
+            rec_debug_state = 0x01;
+             
+        }
+    }
+}
 
 void setup () {
-  Serial.begin(115200);
+  //Serial.begin(115200);
+  Serial.begin(115200, SERIAL_8N1 ,RXD2, TXD2);
+  //Wire.begin(12, 13, 100000);
   bool begin(const char * mountpoint="/sdcard", bool mode1bit=true); // cf. SD_MMC.h
   SD_MMC.begin("/sdcard", true);
-  Wire.begin(16, 13, 100000);
-  SD_MMC.begin("/sdcard", true);
-  // pinMode(4, OUTPUT);
-  // digitalWrite(4, LOW);                                                                                                                                                                                        );
+  //pinMode(4, LOW);
   delay(3000); // wait for console opening
-  Serial.println("\nTroubleshoot sd card pinout");
+  Serial.println("\nTFmini-S UART LiDAR Program");
     
-
-  if (! rtc.begin()) {
-    Serial.println("Couldn't find RTC");
-    while (1);
-  }
-
-  if (rtc.lostPower()) {
-    Serial.println("RTC lost power, lets set the time!");
-    // following line sets the RTC to the date &amp; time this sketch was compiled
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  }
   // CALL:
   initMicroSD();
 
@@ -164,16 +252,9 @@ void setup () {
 }
 
 void loop () {
-  DateTime now = rtc.now();
+ 
+    Get_Lidar_data();
 
-  String date = String(now.day()) + ":" + String(now.month()) + ":" + String(now.year());
-  String time = String(now.hour()) + ":" + String(now.minute()) + ":" + String(now.second());
-  String dataMessage = date + "," + time + "," + "\r\n";
-
-  Serial.println("saving data: ");
-  Serial.println("----------------------------------------------");
-  Serial.println(dataMessage);
-
-  appendFile(SD_MMC, "/example2_data.txt", dataMessage.c_str());
-  delay(1000);
 }
+
+
