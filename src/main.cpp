@@ -14,10 +14,11 @@
 RTC_DS3231 rtc;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
+
 /*-- INITIALIZE TF-MINI LIDAR --*/
 TFMini tfmini;
 
-#define RXD2 14
+#define RXD2 0
 #define TXD2 15
 int dist; /*----actual distance measurements of LiDAR---*/
 int strength; /*----signal strength of LiDAR----------------*/
@@ -31,14 +32,11 @@ int rec_debug_state = 0x01;//receive state for frame
 /*-- INITIALIZE DS3231 RTC --*/
 unsigned int fileCount = 0;
 
-/*----------------------------- MICRO-SD MODULE --------------------------*/
+/***----------------------------- MICRO-SD MODULE --------------------------***/
 void initMicroSD(){  
-  
   //rtc_gpio_hold_en(GPIO_NUM_4);    //make sure flash is held LOW in sleep
   Serial.println("Mounting MicroSD card");
-  bool begin(const char * mountpoint="/sdcard", bool mode1bit=false); // cf. SD_MMC.h
-  SD_MMC.begin("/sdcard", true);
-  if (!SD_MMC.begin()){
+  if (!SD_MMC.begin("/sdcard", true)){
     Serial.println("MicroSD card mount failed");
     return;
   }
@@ -64,7 +62,8 @@ void initMicroSD(){
     uint64_t cardSize = SD_MMC.cardSize()/ (1024*1024);
     Serial.printf("SD_MMC Card Size: %lluMB\n", cardSize);
 }
-/*-- CREATE FOLDER--*/
+
+/***-- CREATE FOLDER--***/
 void createDir(fs::FS &fs, char * path){
     Serial.printf("Creating Dir: %s\n", path);
     if(fs.mkdir(path)){
@@ -91,7 +90,7 @@ void createFiles(fs::FS &fs, const char * path, String message){
     file.close();
 
 }
-/*-- APPEND FILE--*/
+/***-- APPEND FILE--***/
 void appendFile(fs::FS &fs, const char *path, const char *message){
   Serial.printf("Appending to file: %s\n", path);
 
@@ -109,7 +108,7 @@ void appendFile(fs::FS &fs, const char *path, const char *message){
   file.close();
 }
 
-/*-- LIST DIRECTORIES--*/
+/***-- LIST DIRECTORIES--***/
 void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
     Serial.printf("List directories: %s\n", dirname);
 
@@ -141,14 +140,14 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
     }
 }
 
-/*----------------------------- LIDAR/RTC --------------------------*/
+/***----------------------------- LIDAR/RTC --------------------------***/
 void Get_Lidar_data(){
   DateTime now = rtc.now();
-  if (Serial2.available()) //check if serial port has data input
+  if (Serial.available()) //check if serial port has data input
       {
       if(rec_debug_state == 0x01)
           {  //the first byte
-            uart[0]=Serial2.read();
+            uart[0]=Serial.read();
             if(uart[0] == 0x59)
                 {
                   check = uart[0];
@@ -157,7 +156,7 @@ void Get_Lidar_data(){
           }
   else if(rec_debug_state == 0x02)
       {//the second byte
-        uart[1]=Serial2.read();
+        uart[1]=Serial.read();
         if(uart[1] == 0x59)
             {
               check += uart[1];
@@ -170,57 +169,56 @@ void Get_Lidar_data(){
 
   else if(rec_debug_state == 0x03)
           {
-            uart[2]=Serial2.read();
+            uart[2]=Serial.read();
             check += uart[2];
             rec_debug_state = 0x04;
           }
   else if(rec_debug_state == 0x04)
           {
-            uart[3]=Serial2.read();
+            uart[3]=Serial.read();
             check += uart[3];
             rec_debug_state = 0x05;
           }
   else if(rec_debug_state == 0x05)
           {
-            uart[4]=Serial2.read();
+            uart[4]=Serial.read();
             check += uart[4];
             rec_debug_state = 0x06;
           }
   else if(rec_debug_state == 0x06)
           {
-            uart[5]=Serial2.read();
+            uart[5]=Serial.read();
             check += uart[5];
             rec_debug_state = 0x07;
           }
   else if(rec_debug_state == 0x07)
           {
-            uart[6]=Serial2.read();
+            uart[6]=Serial.read();
             check += uart[6];
             rec_debug_state = 0x08;
           }
   else if(rec_debug_state == 0x08)
           {
-            uart[7]=Serial2.read();
+            uart[7]=Serial.read();
             check += uart[7];
             rec_debug_state = 0x09;
           }
   else if(rec_debug_state == 0x09)
           {
-            uart[8]=Serial2.read();
+            uart[8]=Serial.read();
             if(uart[8] == check)
               {
                 dist = uart[2] + uart[3]*256;//the distance
                 strength = uart[4] + uart[5]*256;//the strength
                 temprature = uart[6] + uart[7] *256;//calculate chip temprature
                 temprature = temprature/8 - 256;                              
-                while(Serial2.available()){Serial2.read();} // This part is added becuase some previous packets are there in the buffer so to clear serial buffer and get fresh data.
-                
+                //while(Serial2.available()){Serial2.read();} // This part is added becuase some previous packets are there in the buffer so to clear serial buffer and get fresh data.
                 String date = String(now.day()) + ":" + String(now.month()) + ":" + String(now.year());
                 String time = String(now.hour()) + ":" + String(now.minute()) + ":" + String(now.second());
                 String tf = String(dist) + "," + String(strength) + "," + String(temprature);
                 String dataMessage = date + "," + time + "," + tf + "\r\n";
 
-                Serial.print("saving data: ");
+                Serial.println("saving data: ");
                 Serial.println("----------------------------------------------");
                 Serial.println(dataMessage);
 
@@ -228,35 +226,34 @@ void Get_Lidar_data(){
                 delay(1000);
               }
             rec_debug_state = 0x01;
+             
         }
     }
 }
-void setup () {
-  Serial.begin(115200);
-  Serial2.begin(115200, SERIAL_8N1 ,RXD2, TXD2);
-  Wire.begin(16, 4, 400000);
 
-  pinMode(4, OUTPUT);              //GPIO for LED flash
-  digitalWrite(4, LOW);            //turn OFF flash LED
-  
+void setup () {
+  //Serial.begin(115200);
+  Serial.begin(115200, SERIAL_8N1 ,RXD2, TXD2);
+  Wire.begin(16, 13, 100000);
+  bool begin(const char * mountpoint="/sdcard", bool mode1bit=true); // cf. SD_MMC.h
+  SD_MMC.begin("/sdcard", true);
+  //pinMode(4, LOW);
   delay(3000); // wait for console opening
   Serial.println("\nTFmini-S UART LiDAR Program");
-  
 
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
     while (1);
   }
-
   if (rtc.lostPower()) {
     Serial.println("RTC lost power, lets set the time!");
     // following line sets the RTC to the date &amp; time this sketch was compiled
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  }
+  }    
   // CALL:
   initMicroSD();
 
-    // CALL: create folder
+  // CALL: create folder
   char foldername[20] = "/distance-folder";
   //char filename[20] = "/example0001.txt";
   char * fdir = foldername;
@@ -265,11 +262,9 @@ void setup () {
   // CALL: create file in folder
   String note = "Date, Time(UTC+3:00), Distance, Strength, TF-temperature \r\n";
   createFiles(SD_MMC, "/example1_data.txt", note);
-  
   // CALL: READ FILES
   listDir(SD_MMC,"/", 0);
 }
-
 
 void loop () {
  
